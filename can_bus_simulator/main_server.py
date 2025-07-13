@@ -53,49 +53,25 @@ init_db()
 # Flag to control the message generation thread
 message_thread_running = True
 
-def message_generation_thread():
-    """Background thread that generates CAN messages and broadcasts to clients"""
-    logger.info("Starting message generation thread")
-    
-    while message_thread_running:
-        try:
-            # Generate a new CAN message
-            message = can_simulator.generate_message()
-            
-            # Process through sniffer
-            processed_message = can_sniffer.process_message(message)
-            
-            if processed_message:
-                # Check if this message has a label
-                # (This could be optimized with caching)
-                label = db_session.query(Label).filter(
-                    Label.can_id == processed_message["id"],
-                    Label.data == processed_message["data"]
-                ).first()
-                
-                if label:
-                    processed_message["label"] = label.name
-                
-                # Send to clients
-                socketio.emit('can_message', {
-                    'type': 'can_message',
-                    'data': processed_message
-                })
-                
-                # If calibration is active, record the message
-                if calibration_controller.calibration_active:
-                    calibration_controller.record_message(processed_message)
-            
-            # Control message rate
-            time.sleep(1.0 / config.MESSAGE_RATE)
-            
-        except Exception as e:
-            logger.error(f"Error in message generation thread: {str(e)}")
-            socketio.emit('error', {
-                'type': 'error',
-                'data': f"Error generating messages: {str(e)}"
-            })
-            time.sleep(1.0)  # Wait a bit longer on error
+while message_thread_running:
+    try:
+        message = can_simulator.generate_message()
+        logger.debug(f"Generated message: {message}")
+
+        processed_message = can_sniffer.process_message(message)
+        logger.debug(f"Processed message: {processed_message}")
+
+        if processed_message:
+            # Your existing label lookup and socket emit
+            ...
+            logger.debug(f"Emitting message: {processed_message}")
+        else:
+            logger.debug("No processed message to emit")
+
+        time.sleep(1.0 / config.MESSAGE_RATE)
+
+    except Exception as e:
+        logger.error(f"Error in message generation thread: {str(e)}")
 
 # Routes
 @app.route('/')
@@ -511,12 +487,35 @@ def create_test_data():
         db_session.rollback()
         logger.error(f"Error creating test data: {str(e)}")
 
+def import_can_log(csv_path):
+    """
+    Import CAN messages from a CSV log file into the database.
+    """
+    import csv
+    from main.models.can_message import CANMessage
+
+    with open(csv_path, newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            msg = CANMessage(
+                can_id=row.get('ID'),
+                data=f"{row.get('Signal Name')}:{row.get('Signal Value')}",
+                timestamp=float(row.get('Time [s]', 0))
+            )
+            db_session.add(msg)
+        db_session.commit()
+        logger.info("CAN log import complete.")
+
 # Run the application
 if __name__ == '__main__':
     try:
         # Create test data for development
         if config.DEVELOPMENT_MODE:
             create_test_data()
+            # Import CAN log if available
+            csv_path = os.path.join(os.path.dirname(__file__), 'db', 'virtual_can_log.csv')
+            if os.path.exists(csv_path):
+                import_can_log(csv_path)
         
         # Start the message generation thread
         message_thread = start_message_thread()

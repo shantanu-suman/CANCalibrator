@@ -18,7 +18,19 @@ class PlaybackEngine:
     - Loop playback
     - Import/export of playback sequences
     """
-    
+    from flask_socketio import socketio  # if initialized globally
+
+    def inject_message(self, can_id, data):
+     timestamp = time.time()
+     message = {
+        "id": can_id,
+        "data": data,
+        "timestamp": timestamp,
+        "label": self.labels.get(can_id),
+        "change_detected": True
+    }
+     socketio.emit('can_message', {"type": "can_message", "data": message})
+
     def __init__(self, can_simulator):
         """
         Initialize the Playback Engine
